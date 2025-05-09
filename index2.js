@@ -25,7 +25,7 @@ const chartDoing = async () => {
 
             if (chartData.length > 0) {
                 console.clear(); // Clear the console for a fresh chart
-                console.log(asciichart.plot(chartData, { height: 10 })); // Render the chart
+                console.log(asciichart.plot(chartData, { height: 15 })); // Render the chart
             } else {
                 console.error('No valid numeric data found for the chart.');
             }

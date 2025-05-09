@@ -48,7 +48,7 @@ const main = async () => {
 
 const order = async () => {
     let size = 10; // Define the trade size (in BTC)
-    const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 5);
+    const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 10);
     const bPrice = prices.map(prise => {
         return {
             timestamp: moment(prise[0]).format('YYYY-MM-DD HH:mm:ss'),
@@ -70,7 +70,11 @@ const order = async () => {
     infoPrice.timestamp= moment().format('YYYY-MM-DD HH:mm:ss');
 
     infoPrice.direction = 'hold'; // Initialize direction to 'none'
-    if (infoPrice.lastPrice > infoPrice.averagePrice && balance.total.BTC > infoPrice.quantity) {
+    if (infoPrice.lastPrice > infoPrice.averagePrice && balance.total.BTC > 0) {
+        if(balance.total.BTC < infoPrice.quantity) {
+            infoPrice.quantity = balance.total.BTC
+        }
+        // infoPrice.quantity = balance.total.BTC
         infoPrice.direction = 'sell'; // Set direction to 'sell' if last price is greater than average price and BTC balance is greater than 0
     } else if (infoPrice.lastPrice < infoPrice.averagePrice && balance.total.USDT / infoPrice.lastPrice >= infoPrice.quantity) {
         infoPrice.direction = 'buy'; // Set direction to 'buy' if last price is less than average price and USDT balance is greater than 0
