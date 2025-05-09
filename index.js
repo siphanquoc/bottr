@@ -7,8 +7,8 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const binance = new ccxt.binance({
-    apiKey: process.env.BINANCE_API_KEY,
-    secret: process.env.BINANCE_API_SECRET,
+    apiKey: process.env.API_KEY,
+    secret: process.env.API_SECRET,
     options: {
         recvWindow: 60000 // Set recvWindow to 60 seconds (60000 ms)
     },
@@ -26,7 +26,7 @@ const printBalance = async (infoPrice) => {
         // Check if the log file already exists
         if (fs.existsSync(logFilePath)) {
             const existingData = JSON.parse(fs.readFileSync(logFilePath, 'utf8'));
-            existingData.push(infoPrice); // Append new data to existing data
+            existingData.unshift(infoPrice); // unshift new data to existing data
             fs.writeFileSync(logFilePath, JSON.stringify(existingData, null, 2), 'utf8'); // Write the updated data back to the file
         } else {
             fs.writeFileSync(logFilePath, JSON.stringify([infoPrice], null, 2), 'utf8'); // Create a new file with the log data
@@ -39,7 +39,16 @@ const printBalance = async (infoPrice) => {
 }
 
 const main = async () => {
-    const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 20);
+    // const order = await binance.createMarketOrder('ETH/USDT', 'buy', 40);
+    while (true) {
+        await order(); // Call the order function with the bPrice data
+        await delay(60000); // Wait for 1 minute before the next iteration
+    }
+}
+
+const order = async () => {
+    let size = 10; // Define the trade size (in BTC)
+    const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 5);
     const bPrice = prices.map(prise => {
         return {
             timestamp: moment(prise[0]).format('YYYY-MM-DD HH:mm:ss'),
@@ -50,43 +59,36 @@ const main = async () => {
             volume: prise[5]
         }
     })
-    // const order = await binance.createMarketOrder('ETH/USDT', 'buy', 0.01);
-    while (true) {
-        await order(bPrice); // Call the order function with the bPrice data
-        await delay(60000); // Wait for 1 minute before the next iteration
-    }
-}
-
-const order = async (bPrice) => {
-    let size = 10; // Define the trade size (in BTC)
     let infoPrice = {
         'listLastPrice': bPrice.map(price => price.close).join(', '),
     }
     const balance = await binance.fetchBalance();
-    if (balance) {
-        infoPrice.balance = {
-            BTC: balance.total.BTC,
-            USDT: balance.total.USDT,
-        }
-    }
-  
+    
     infoPrice.averagePrice = bPrice.reduce((acc, price) => acc + price.close, 0) / bPrice.length;
     infoPrice.lastPrice = bPrice[bPrice.length - 1].close;
     infoPrice.quantity = size / infoPrice.lastPrice; // Calculate the quantity based on the trade size and last price
     infoPrice.timestamp= moment().format('YYYY-MM-DD HH:mm:ss');
 
-    infoPrice.direction = 'none'; // Initialize direction to 'none'
-    if (infoPrice.lastPrice > infoPrice.averagePrice) {
+    infoPrice.direction = 'hold'; // Initialize direction to 'none'
+    if (infoPrice.lastPrice > infoPrice.averagePrice && balance.total.BTC > infoPrice.quantity) {
         infoPrice.direction = 'sell'; // Set direction to 'sell' if last price is greater than average price and BTC balance is greater than 0
-    } else if (infoPrice.lastPrice < infoPrice.averagePrice && infoPrice.quantity > 0.0005) {
+    } else if (infoPrice.lastPrice < infoPrice.averagePrice && balance.total.USDT / infoPrice.lastPrice >= infoPrice.quantity) {
         infoPrice.direction = 'buy'; // Set direction to 'buy' if last price is less than average price and USDT balance is greater than 0
     } 
     
-    if(infoPrice.direction !== 'none') {
-        await binance.createMarketOrder('BTC/USDT', infoPrice.direction, infoPrice.quantity); // Create a market order to buy BTC/USDT
+    if(infoPrice.direction !== 'hold') {
+        await binance.createMarketOrder('BTC/USDT', infoPrice.direction, infoPrice.quantity); // Create a market order to buy or sell BTC/USDT
     }
 
-    infoPrice.balance.totalUSDT = balance.total.BTC * infoPrice.lastPrice + balance.total.USDT
+    const balanceAfterOrder = await binance.fetchBalance();
+    if (balanceAfterOrder) {
+        infoPrice.balance = {
+            BTC: balanceAfterOrder.total.BTC,
+            USDT: balanceAfterOrder.total.USDT,
+            totalUSDT : balanceAfterOrder.total.BTC * infoPrice.lastPrice + balanceAfterOrder.total.USDT
+        }
+    }
+
     await printBalance(infoPrice); // Call the printBalance function to log the balance
 }
 
