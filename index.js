@@ -4,16 +4,10 @@ const path = require('path');
 const moment = require('moment');
 const delay = require('delay');
 const dotenv = require('dotenv');
+const { google } = require('googleapis');
 dotenv.config();
 
-const binance = new ccxt.binance({
-    apiKey: process.env.API_KEY,
-    secret: process.env.API_SECRET,
-    options: {
-        recvWindow: 60000 // Set recvWindow to 60 seconds (60000 ms)
-    },
-});
-binance.setSandboxMode(true); // Enable sandbox mode for testing
+var fileContent = undefined
 
 const printBalance = async (infoPrice) => {
     try {
@@ -38,15 +32,7 @@ const printBalance = async (infoPrice) => {
     }
 }
 
-const main = async () => {
-    // const order = await binance.createMarketOrder('ETH/USDT', 'buy', 40);
-    while (true) {
-        await order(); // Call the order function with the bPrice data
-        await delay(60000); // Wait for 1 minute before the next iteration
-    }
-}
-
-const order = async () => {
+const order = async (binance) => {
     let size = 10; // Define the trade size (in BTC)
     const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 10);
     const bPrice = prices.map(prise => {
@@ -94,6 +80,59 @@ const order = async () => {
     }
 
     await printBalance(infoPrice); // Call the printBalance function to log the balance
+}
+
+
+const getKeyfromGDrive = async () => {
+    try {
+        const auth = new google.auth.GoogleAuth({
+            keyFile: path.join('./', 'credentials.json'), // Path to your service account key file
+            scopes: [process.env.GOOGLE_AUTH_SCOPES]
+        });
+        
+        const drive = google.drive({ version: 'v3', auth });
+        const fileId = process.env.GOOGLE_FIELD_ID;
+        const res = await drive.files.get(
+            { fileId, alt: 'media' },
+            { responseType: 'stream' }
+        );
+        await new Promise((resolve, reject) => {
+            res.data
+                .on('data', (chunk) => {
+                    fileContent = JSON.parse(chunk.toString()); // Append each chunk to the fileContent variable
+                })
+                .on('end', resolve)
+                .on('error', reject);
+        });
+        
+    } catch (error) {
+        console.error('Error in getKeyfromGDrive:', error);
+        throw error; // Re-throw the error to propagate it
+    }
+    
+}
+
+const main = async () => {
+    try {
+        await getKeyfromGDrive(); // Await the function to handle its promise
+        if(!fileContent) return;
+            const binance = new ccxt.binance({
+                apiKey: fileContent.apiKey,
+                secret: fileContent.secretKey,
+                options: {
+                    recvWindow: 60000 // Set recvWindow to 60 seconds (60000 ms)
+                },
+            });
+        binance.setSandboxMode(true); 
+        // Enable sandbox mode for testing
+        // const order = await binance.createMarketOrder('ETH/USDT', 'buy', 40);
+        while (true) {
+            await order(binance); // Call the order function with the bPrice data
+            await delay(60000); // Wait for 1 minute before the next iteration
+        }
+    } catch (error) {
+        console.error('Error in main:', error);
+    }
 }
 
 main()

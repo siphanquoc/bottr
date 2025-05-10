@@ -4,3 +4,5 @@ log
 node_modules
 .idx/dev.nix
 package-lock.json
+package-lock.json
+credentials.json
