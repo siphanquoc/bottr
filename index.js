@@ -61,9 +61,9 @@ const order = async (binance) => {
             infoPrice.quantity = balance.total.BTC
         }
         // infoPrice.quantity = balance.total.BTC
-        infoPrice.direction = 'buy'; // Set direction to 'sell' if last price is greater than average price and BTC balance is greater than 0
+        infoPrice.direction = 'sell'; // Set direction to 'sell' if last price is greater than average price and BTC balance is greater than 0
     } else if (infoPrice.lastPrice < infoPrice.averagePrice && balance.total.USDT / infoPrice.lastPrice >= infoPrice.quantity) {
-        infoPrice.direction = 'sell'; // Set direction to 'buy' if last price is less than average price and USDT balance is greater than 0
+        infoPrice.direction = 'buy'; // Set direction to 'buy' if last price is less than average price and USDT balance is greater than 0
     } 
     
     if(infoPrice.direction !== 'hold') {
