@@ -34,7 +34,7 @@ const printBalance = async (infoPrice) => {
 
 const order = async (binance) => {
     let size = 20; // Define the trade size (in BTC)
-    const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 5);
+    const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 10);
     const bPrice = prices.map(prise => {
         return {
             timestamp: moment(prise[0]).format('YYYY-MM-DD HH:mm:ss'),
