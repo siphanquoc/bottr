@@ -4,13 +4,28 @@ const path = require('path');
 const moment = require('moment');
 const delay = require('delay');
 const dotenv = require('dotenv');
-const { SMA, EMA, RSI } = require('technicalindicators');
+const { SMA, EMA, RSI, MACD, Stochastic } = require('technicalindicators');
 const { google } = require('googleapis');
 dotenv.config();
 
 let credentials = null;
-const MIN_BTC_AMOUNT = 0.00001; // Binance minimum BTC trade amount
-const DEBUG_MODE = true; // Enable detailed logging for debugging
+const MIN_BTC_AMOUNT = 0.00001;
+const DEBUG_MODE = true;
+const AGGRESSIVE_MODE = true;
+const MAX_RISK_PERCENT = 3;
+const MAX_POSITION_SIZE = 0.3;
+const VOLATILITY_THRESHOLD = 0.015;
+const TRADE_COOLDOWN = 15000;
+
+// Trade state tracking
+let tradeState = {
+    lastTrade: null,
+    positionSize: 0,
+    entryPrice: 0,
+    dailyProfit: 0,
+    tradesToday: 0,
+    consecutiveLosses: 0,
+};
 
 const logTrade = async (tradeInfo) => {
     try {
@@ -44,7 +59,7 @@ const calculateATR = (prices, period = 14) => {
     
     const trueRanges = [];
     for (let i = 1; i < prices.length; i++) {
-        const prevClose = prices[i-1][4];
+        const prevClose = prices[i - 1][4];
         const high = prices[i][2];
         const low = prices[i][3];
         
@@ -55,116 +70,174 @@ const calculateATR = (prices, period = 14) => {
         trueRanges.push(Math.max(tr1, tr2, tr3));
     }
     
-    // Simple moving average of true ranges
     const atr = trueRanges.slice(0, period).reduce((sum, val) => sum + val, 0) / period;
     return atr;
 };
 
 const formatAmount = (amount) => {
-    // Format to 5 decimal places and ensure it meets minimum requirement
     return parseFloat(amount.toFixed(5));
+};
+
+const calculateEnhancedIndicators = (prices) => {
+    const closes = prices.map(p => p[4]);
+    const highs = prices.map(p => p[2]);
+    const lows = prices.map(p => p[3]);
+    
+    const sma20 = SMA.calculate({ period: 20, values: closes });
+    const ema12 = EMA.calculate({ period: 12, values: closes });
+    const ema26 = EMA.calculate({ period: 26, values: closes });
+    const rsi14 = RSI.calculate({ period: 14, values: closes });
+    
+    const macd = MACD.calculate({
+        values: closes,
+        fastPeriod: 12,
+        slowPeriod: 26,
+        signalPeriod: 9,
+        SimpleMAOscillator: false,
+        SimpleMASignal: false
+    });
+    
+    const stoch = Stochastic.calculate({
+        high: highs,
+        low: lows,
+        close: closes,
+        period: 14,
+        signalPeriod: 3
+    });
+    
+    const atr = calculateATR(prices, 14);
+    const volatilityRatio = atr / closes[closes.length - 1];
+    
+    const current = {
+        price: closes[closes.length - 1],
+        sma20: sma20[sma20.length - 1],
+        ema12: ema12[ema12.length - 1],
+        ema26: ema26[ema26.length - 1],
+        rsi14: rsi14[rsi14.length - 1],
+        macd: macd[macd.length - 1],
+        stoch: stoch[stoch.length - 1],
+        atr,
+        volatilityRatio
+    };
+    
+    const previous = {
+        ema12: ema12[ema12.length - 2],
+        ema26: ema26[ema26.length - 2],
+        macd: macd[macd.length - 2],
+        stoch: stoch[stoch.length - 2],
+    };
+    
+    return { current, previous };
 };
 
 const executeTrade = async (binance) => {
     const TRADE_PAIR = 'BTC/USDT';
     const TIME_FRAME = '1m';
     const OHLCV_LENGTH = 100;
-    const RISK_PERCENT = 1;
-    const MAX_POSITION = 0.2;
     
     try {
+        // Trade cooldown protection
+        if (tradeState.lastTrade && Date.now() - tradeState.lastTrade < TRADE_COOLDOWN) {
+            await delay(TRADE_COOLDOWN - (Date.now() - tradeState.lastTrade));
+        }
+
         const prices = await binance.fetchOHLCV(TRADE_PAIR, TIME_FRAME, undefined, OHLCV_LENGTH);
         if (prices.length < 50) {
             console.error('Insufficient data');
             return null;
         }
-        
-        const closes = prices.map(p => p[4]);
-        const lastPrice = closes[closes.length - 1];
-        
-        // Calculate indicators
-        const sma20 = SMA.calculate({ period: 20, values: closes });
-        const ema12 = EMA.calculate({ period: 12, values: closes });
-        const ema26 = EMA.calculate({ period: 26, values: closes });
-        const rsi14 = RSI.calculate({ period: 14, values: closes });
-        
-        const currentSMA20 = sma20[sma20.length - 1];
-        const currentEMA12 = ema12[ema12.length - 1];
-        const currentEMA26 = ema26[ema26.length - 1];
-        const currentRSI14 = rsi14[rsi14.length - 1];
-        
+
+        const { current, previous } = calculateEnhancedIndicators(prices);
+        const lastPrice = current.price;
+
         const balance = await binance.fetchBalance();
         const btcBal = balance.total.BTC || 0;
         const usdtBal = balance.total.USDT || 0;
         const portfolioValue = (btcBal * lastPrice) + usdtBal;
-        
-        // Calculate position size using ATR for better volatility measure
-        const atr = calculateATR(prices, 14);
-        const riskAmount = portfolioValue * (RISK_PERCENT / 100);
-        const rawPositionSize = Math.min(
-            (riskAmount / (atr || 10)) / lastPrice, // Fallback to $10 volatility if ATR is 0
-            (usdtBal * MAX_POSITION) / lastPrice
-        );
-        
-        // Format position size to meet exchange requirements
-        const positionSize = formatAmount(rawPositionSize);
-        const minTradeValue = lastPrice * MIN_BTC_AMOUNT;
-        
-        // Trading strategy conditions
-        const goldenCross = currentEMA12 > currentEMA26;
-        const deathCross = currentEMA12 < currentEMA26;
-        const aboveSMA = lastPrice > currentSMA20;
-        const rsiOverbought = currentRSI14 > 70;
-        const rsiOversold = currentRSI14 < 30;
-        
-        // Debugging information
+
+        // Debug logging for indicator values
         debugLog('--- INDICATOR VALUES ---');
-        debugLog(`EMA12: ${currentEMA12}, EMA26: ${currentEMA26}`);
-        debugLog(`SMA20: ${currentSMA20}, Price: ${lastPrice}`);
-        debugLog(`RSI14: ${currentRSI14}`);
-        debugLog(`ATR: ${atr}`);
+        debugLog(`EMA12: ${current.ema12}, EMA26: ${current.ema26}`);
+        debugLog(`SMA20: ${current.sma20}, Price: ${lastPrice}`);
+        debugLog(`RSI14: ${current.rsi14}`);
+        debugLog(`ATR: ${current.atr}`);
+
+        // Debug logging for portfolio
         debugLog('--- PORTFOLIO ---');
         debugLog(`BTC: ${btcBal}, USDT: ${usdtBal}, Portfolio Value: ${portfolioValue}`);
+
+        // Dynamic position sizing
+        const riskAmount = portfolioValue * (MAX_RISK_PERCENT / 100);
+        const rawPositionSize = Math.min(
+            (riskAmount / (current.atr || 10)) / lastPrice,
+            (usdtBal * MAX_POSITION_SIZE) / lastPrice
+        );
+
+        const positionSize = formatAmount(rawPositionSize);
+        const minTradeValue = lastPrice * MIN_BTC_AMOUNT;
+
+        // Debug logging for position calculation
         debugLog('--- POSITION CALCULATION ---');
         debugLog(`Risk Amount: ${riskAmount}, Position Size: ${positionSize} BTC`);
-        debugLog(`Min Trade Value: ${minTradeValue} USDT, Position Value: ${positionSize * lastPrice} USDT`);
-        
-        // Trade decision logic
+        debugLog(`Min Trade Value: ${minTradeValue} USDT, Position Value: ${usdtBal * positionSize}`);
+
+        // Trade decision logic...
         let direction = 'hold';
-        let decisionReason = '';
+        let decisionReason = 'No trade conditions met';
+
+        // Enhanced trading conditions
+        const goldenCross = current.ema12 > current.ema26 && previous.ema12 <= previous.ema26;
+        const deathCross = current.ema12 < current.ema26 && previous.ema12 >= previous.ema26;
+        const macdBullish = current.macd.MACD > current.macd.signal;
+        const macdBearish = current.macd.MACD < current.macd.signal;
+        const stochBullish = current.stoch.k > 20 && current.stoch.k > current.stoch.d;
+        const stochBearish = current.stoch.k < 80 && current.stoch.k < current.stoch.d;
+        const aboveSMA = lastPrice > current.sma20;
+        const rsiOverbought = current.rsi14 > 70;
+        const rsiOversold = current.rsi14 < 30;
+        const highVolatility = current.volatilityRatio > VOLATILITY_THRESHOLD;
         
-        if (positionSize >= MIN_BTC_AMOUNT && 
-            goldenCross && 
-            aboveSMA && 
-            !rsiOverbought && 
-            usdtBal >= positionSize * lastPrice) {
-            
-            direction = 'buy';
-            decisionReason = 'Golden cross + Above SMA20 + RSI not overbought';
-        } 
-        else if (rsiOversold && 
-                 usdtBal >= positionSize * lastPrice && 
-                 positionSize >= MIN_BTC_AMOUNT) {
-            
-            direction = 'buy';
-            decisionReason = 'RSI oversold condition';
-        }
-        else if ((deathCross || rsiOverbought) && btcBal > 0) {
-            // For sell orders, use the smaller of positionSize or available BTC
-            const sellSize = formatAmount(Math.min(btcBal, positionSize));
-            if (sellSize >= MIN_BTC_AMOUNT) {
-                direction = 'sell';
-                decisionReason = deathCross ? 'Death cross' : 'RSI overbought';
-            } else {
-                decisionReason = `Sell size too small: ${sellSize} < ${MIN_BTC_AMOUNT}`;
+        if (AGGRESSIVE_MODE) {
+            if (positionSize >= MIN_BTC_AMOUNT && usdtBal >= positionSize * lastPrice) {
+                // Momentum breakout
+                if (goldenCross && macdBullish && stochBullish && aboveSMA && highVolatility) {
+                    direction = 'buy';
+                    decisionReason = 'Momentum breakout';
+                } 
+                // Reversal pattern
+                else if (rsiOversold && current.rsi14 > previous.rsi14 && !deathCross) {
+                    direction = 'buy';
+                    decisionReason = 'RSI reversal';
+                }
             }
-        } else {
-            decisionReason = 'No trade conditions met';
+            
+            // Aggressive exit conditions
+            if (btcBal > 0) {
+                const sellSize = formatAmount(Math.min(btcBal, positionSize));
+                if (sellSize >= MIN_BTC_AMOUNT) {
+                    // Take profit strategy
+                    const profitPercent = tradeState.entryPrice > 0 ? 
+                        ((lastPrice - tradeState.entryPrice) / tradeState.entryPrice) * 100 : 0;
+                    
+                    if (profitPercent > 1.5) {
+                        direction = 'sell';
+                        decisionReason = `Take profit (${profitPercent.toFixed(2)}%)`;
+                    }
+                    // Stop loss strategy
+                    else if (profitPercent < -1) {
+                        direction = 'sell';
+                        decisionReason = `Stop loss (${profitPercent.toFixed(2)}%)`;
+                    }
+                    // Technical exit signals
+                    else if (deathCross || rsiOverbought || macdBearish) {
+                        direction = 'sell';
+                        decisionReason = 'Technical exit';
+                    }
+                }
+            }
         }
-        
-        debugLog('--- TRADE DECISION ---');
-        debugLog(`Direction: ${direction}, Reason: ${decisionReason}`);
-        
+
+        // Execute trade
         let executedSize = 0;
         if (direction !== 'hold') {
             const orderSize = direction === 'buy' 
@@ -175,37 +248,49 @@ const executeTrade = async (binance) => {
                 debugLog(`Creating ${direction} order for ${orderSize} BTC`);
                 await binance.createMarketOrder(TRADE_PAIR, direction, orderSize);
                 executedSize = orderSize;
-            } else {
-                debugLog(`Skipped trade: Order size ${orderSize} BTC is below minimum ${MIN_BTC_AMOUNT} BTC`);
-                direction = 'hold'; // Reset direction
+                
+                // Update trade state
+                tradeState.lastTrade = Date.now();
+                tradeState.tradesToday++;
+                
+                if (direction === 'buy') {
+                    tradeState.positionSize = orderSize;
+                    tradeState.entryPrice = lastPrice;
+                    tradeState.consecutiveLosses = 0;
+                } else {
+                    const profitPercent = tradeState.entryPrice > 0 ? 
+                        ((lastPrice - tradeState.entryPrice) / tradeState.entryPrice) * 100 : 0;
+                    
+                    tradeState.dailyProfit += profitPercent;
+                    tradeState.positionSize = 0;
+                    
+                    // Update win/loss tracking
+                    if (profitPercent <= 0) {
+                        tradeState.consecutiveLosses++;
+                    } else {
+                        tradeState.consecutiveLosses = 0;
+                    }
+                }
             }
         }
         
+        // Enhanced trade logging
         const tradeInfo = {
             timestamp: moment().format('YYYY-MM-DD HH:mm:ss'),
             direction,
             size: executedSize,
             price: lastPrice,
-            indicators: {
-                sma20: currentSMA20,
-                ema12: currentEMA12,
-                ema26: currentEMA26,
-                rsi14: currentRSI14,
-                atr
-            },
+            indicators: current,
             portfolio: {
                 BTC: btcBal,
                 USDT: usdtBal,
                 totalValue: portfolioValue
             },
             decisionReason,
-            conditions: {
-                goldenCross,
-                deathCross,
-                aboveSMA,
-                rsiOverbought,
-                rsiOversold
-            }
+            dailyProfit: tradeState.dailyProfit,
+            tradesToday: tradeState.tradesToday,
+            consecutiveLosses: tradeState.consecutiveLosses,
+            riskPercent: MAX_RISK_PERCENT
         };
         
         await logTrade(tradeInfo);
@@ -227,7 +312,6 @@ const getKeysFromGoogleDrive = async () => {
         
         const drive = google.drive({ version: 'v3', auth });
         
-        // Using stream response as requested
         const response = await drive.files.get(
             { fileId: process.env.GOOGLE_FIELD_ID, alt: 'media' },
             { responseType: 'stream' }
@@ -272,25 +356,33 @@ const main = async () => {
         });
         
         binance.setSandboxMode(true);
-        
-        // Load markets to get precision info
         await binance.loadMarkets();
-        const market = binance.market('BTC/USDT');
-        debugLog('Market precision:', market.precision);
         
         while (true) {
             try {
                 console.log(`\n[${moment().format('HH:mm:ss')}] Starting trading cycle...`);
                 const tradeResult = await executeTrade(binance);
-                if (tradeResult && tradeResult.direction !== 'hold') {
-                    console.log(`Executed ${tradeResult.direction} order for ${tradeResult.size} BTC at ${tradeResult.price} USDT`);
-                } else {
-                    console.log('No trade executed');
+                
+                if (tradeResult) {
+                    if (tradeResult.direction !== 'hold') {
+                        console.log(`Executed ${tradeResult.direction} order: ${tradeResult.size} BTC at ${tradeResult.price}`);
+                        console.log(`Reason: ${tradeResult.decisionReason}`);
+                    }
+                    console.log(`Daily profit: ${tradeResult.dailyProfit.toFixed(2)}%`);
                 }
+                
+                const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 20);
+                const atr = calculateATR(prices, 14);
+                const lastPrice = prices[prices.length - 1][4];
+                const volatility = atr / lastPrice;
+                
+                const delayTime = volatility > 0.02 ? 30000 : 60000;
+                await delay(delayTime);
+                
             } catch (error) {
                 console.error('Cycle error:', error);
+                await delay(30000); // Wait 30 seconds after errors
             }
-            await delay(60000); // 1 minute delay
         }
     } catch (error) {
         console.error('Fatal error:', error);
