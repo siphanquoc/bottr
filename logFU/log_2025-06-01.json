@@ -1,0 +1,374 @@
+[
+  {
+    "time": "2025-06-01 23:49:38",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 14999.57310056,
+      "totalUSD": 14999.57310056
+    },
+    "action": "buy",
+    "quantity": 0.0010463743604036723,
+    "price": 105124.9,
+    "orderId": "4477051904",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 14999.51215044,
+      "totalUSD": 14999.51215044
+    }
+  },
+  {
+    "time": "2025-06-01 23:48:36",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 14999.69909419,
+      "totalUSD": 14999.69909419
+    },
+    "action": "buy",
+    "quantity": 0.0010462479645721415,
+    "price": 105137.6,
+    "orderId": "4477050064",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 14999.63783852,
+      "totalUSD": 14999.63783852
+    }
+  },
+  {
+    "time": "2025-06-01 23:47:35",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 14999.839914,
+      "totalUSD": 14999.839914
+    },
+    "action": "buy",
+    "quantity": 0.0010461842806056456,
+    "price": 105144,
+    "orderId": "4477047915",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 14999.796556,
+      "totalUSD": 14999.796556
+    }
+  },
+  {
+    "time": "2025-06-01 23:46:33",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 14999.85733513,
+      "totalUSD": 14999.85733513
+    },
+    "action": "buy",
+    "quantity": 0.0010458749266699055,
+    "price": 105175.1,
+    "orderId": "4477045401",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 14999.80777183,
+      "totalUSD": 14999.80777183
+    }
+  },
+  {
+    "time": "2025-06-01 23:45:32",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 14999.94513292,
+      "totalUSD": 14999.94513292
+    },
+    "action": "buy",
+    "quantity": 0.0010459813396929,
+    "price": 105164.4,
+    "orderId": "4477043577",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 14999.91126672,
+      "totalUSD": 14999.91126672
+    }
+  },
+  {
+    "time": "2025-06-01 23:44:30",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "buy",
+    "quantity": 0.0010459524966410661,
+    "price": 105167.3,
+    "orderId": "4477041233",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 14999.95653292,
+      "totalUSD": 14999.95653292
+    }
+  },
+  {
+    "time": "2025-06-01 23:43:49",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:42:48",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:42:17",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:41:17",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:40:16",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:39:15",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:38:14",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:37:03",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:36:02",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:35:01",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:34:01",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:33:00",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:31:59",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:30:58",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:29:58",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:28:57",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Order size too small: 0.000190 BTC < min order size 0.001",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:28:26",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Quantity less than minimum lot size (0.001)",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  },
+  {
+    "time": "2025-06-01 23:27:25",
+    "balanceBefore": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    },
+    "action": "hold",
+    "reason": "Quantity less than minimum lot size (0.001)",
+    "balanceAfter": {
+      "BTC": 0,
+      "USDT": 15000,
+      "totalUSD": 15000
+    }
+  }
+]

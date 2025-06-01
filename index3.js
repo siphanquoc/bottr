@@ -11,7 +11,7 @@ dotenv.config();
 let fileContent = undefined;
 const logDir = './logFU';
 
-const dcaAmount = 20; // USD mỗi lần mua
+const dcaAmount = 110; // USD mỗi lần mua
 const dcaInterval = 60000; // 1 phút (bạn có thể chỉnh lại)
 const MIN_ORDER_SIZE = 0.001; // Min order size 0.001 BTC của Binance Futures
 
@@ -85,7 +85,10 @@ const placeDCAOrder = async (binance) => {
         }
 
         const quantity = dcaAmount / lastPrice;
-
+        console.log('lastPrice: ', lastPrice);
+        
+        console.log('quantity: ', quantity);
+        
         if (quantity < MIN_ORDER_SIZE) {
             info.action = 'hold';
             info.reason = `Order size too small: ${quantity.toFixed(6)} BTC < min order size ${MIN_ORDER_SIZE}`;
