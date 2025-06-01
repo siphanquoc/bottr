@@ -2,169 +2,281 @@ const ccxt = require('ccxt');
 const fs = require('fs');
 const path = require('path');
 const moment = require('moment');
-const delay = require('delay');
 const dotenv = require('dotenv');
 const { google } = require('googleapis');
 
 dotenv.config();
 
-let fileContent = undefined;
-const logDir = './logFU';
+const SYMBOL = 'BTC/USDT';
+const DCA_USD_AMOUNT = 110;
+const MIN_BTC_AMOUNT = 0.001;
+const DCA_INTERVAL = 60 * 1000;
 
-const dcaAmount = 110; // USD mỗi lần mua
-const dcaInterval = 60000; // 1 phút (bạn có thể chỉnh lại)
-const MIN_ORDER_SIZE = 0.001; // Min order size 0.001 BTC của Binance Futures
+const LOG_DIR = path.join(__dirname, 'logFU');
+if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR);
 
-if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir);
+function logJSON(data) {
+  const filename = path.join(LOG_DIR, `log_${moment().format('YYYY-MM-DD')}.json`);
+  let logs = [];
+  if (fs.existsSync(filename)) {
+    try {
+      logs = JSON.parse(fs.readFileSync(filename));
+    } catch {
+      logs = [];
+    }
+  }
+  logs.unshift(data);
+  fs.writeFileSync(filename, JSON.stringify(logs, null, 2));
+  console.log(`${moment().format('YYYY-MM-DD HH:mm:ss')} | ${data.event} | ${data.message}`);
 }
 
-const logInfo = async (info) => {
-    const logFilePath = path.join(logDir, `log_${moment().format('YYYY-MM-DD')}.json`);
-    const existing = fs.existsSync(logFilePath) ? JSON.parse(fs.readFileSync(logFilePath)) : [];
-    existing.unshift(info);
-    fs.writeFileSync(logFilePath, JSON.stringify(existing, null, 2));
-};
-
-const getKeyFromGDrive = async () => {
-    const auth = new google.auth.GoogleAuth({
-        keyFile: './credentials.json',
-        scopes: [process.env.GOOGLE_AUTH_SCOPES],
+// Lấy API key/secret từ Google Drive
+async function getKeyFromGDrive() {
+  const auth = new google.auth.GoogleAuth({
+    keyFile: './credentials.json',
+    scopes: [process.env.GOOGLE_AUTH_SCOPES],
+  });
+  const drive = google.drive({ version: 'v3', auth });
+  const res = await drive.files.get(
+    { fileId: process.env.GOOGLE_FIELD_ID_FU, alt: 'media' },
+    { responseType: 'stream' }
+  );
+  return new Promise((resolve, reject) => {
+    let data = '';
+    res.data.on('data', chunk => (data += chunk.toString()));
+    res.data.on('end', () => {
+      try {
+        resolve(JSON.parse(data));
+      } catch (e) {
+        reject(e);
+      }
     });
-    const drive = google.drive({ version: 'v3', auth });
-    const res = await drive.files.get(
-        { fileId: process.env.GOOGLE_FIELD_ID_FU, alt: 'media' },
-        { responseType: 'stream' }
-    );
-    return new Promise((resolve, reject) => {
-        let data = '';
-        res.data.on('data', chunk => data += chunk.toString());
-        res.data.on('end', () => {
-            fileContent = JSON.parse(data);
-            resolve();
-        });
-        res.data.on('error', reject);
-    });
-};
+    res.data.on('error', reject);
+  });
+}
 
-const getLastPrice = async (binance) => {
-    const ticker = await binance.fetchTicker('BTC/USDT');
+class BinanceFuturesDCA {
+  constructor(apiKey, secret) { 
+    this.exchange = new ccxt.binance({
+        apiKey: apiKey,
+        secret: secret,
+        enableRateLimit: true,
+        options: {
+            defaultType: 'future',
+            adjustForTimeDifference: true,
+        },
+        urls: {
+            api: {
+                public: 'https://testnet.binancefuture.com/fapi/v1',
+                private: 'https://testnet.binancefuture.com/fapi/v1',
+            }
+        }
+    });
+    this.exchange.setSandboxMode(true); // testnet mode
+  }
+
+  async fetchBalance() {
+    return await this.exchange.fetchBalance();
+  }
+
+  async fetchPositions() {
+    const positions = await this.exchange.fetchPositions([SYMBOL]);
+    if (!positions || positions.length === 0) return null;
+    return positions.find(p => p.symbol === SYMBOL && p.contracts > 0) || null;
+  }
+
+  async getLastPrice() {
+    const ticker = await this.exchange.fetchTicker(SYMBOL);
     return ticker.last;
-};
+  }
 
-const placeDCAOrder = async (binance) => {
-    try {
-        const lastPrice = await getLastPrice(binance);
-        const balanceBefore = await binance.fetchBalance();
-        const totalBefore = balanceBefore.total.BTC * lastPrice + balanceBefore.total.USDT;
-
-        let info = {
-            time: moment().format('YYYY-MM-DD HH:mm:ss'),
-            balanceBefore: {
-                BTC: balanceBefore.total.BTC,
-                USDT: balanceBefore.total.USDT,
-                totalUSD: totalBefore
-            }
-        };
-
-        if (balanceBefore.total.USDT < dcaAmount) {
-            info.action = 'hold';
-            info.reason = 'Insufficient USDT balance';
-
-            const balanceAfter = await binance.fetchBalance();
-            const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
-            info.balanceAfter = {
-                BTC: balanceAfter.total.BTC,
-                USDT: balanceAfter.total.USDT,
-                totalUSD: totalAfter
-            };
-
-            console.log(`⏸️ HOLD - Không đủ USDT để mua.`);
-            await logInfo(info);
-            return;
-        }
-
-        const quantity = dcaAmount / lastPrice;
-        console.log('lastPrice: ', lastPrice);
-        
-        console.log('quantity: ', quantity);
-        
-        if (quantity < MIN_ORDER_SIZE) {
-            info.action = 'hold';
-            info.reason = `Order size too small: ${quantity.toFixed(6)} BTC < min order size ${MIN_ORDER_SIZE}`;
-
-            const balanceAfter = await binance.fetchBalance();
-            const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
-            info.balanceAfter = {
-                BTC: balanceAfter.total.BTC,
-                USDT: balanceAfter.total.USDT,
-                totalUSD: totalAfter
-            };
-
-            console.log(`⏸️ HOLD - Số lượng mua nhỏ hơn ${MIN_ORDER_SIZE} BTC.`);
-            await logInfo(info);
-            return;
-        }
-
-        const order = await binance.createMarketBuyOrder('BTC/USDT', quantity);
-
-        const balanceAfter = await binance.fetchBalance();
-        const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
-
-        info.action = 'buy';
-        info.quantity = quantity;
-        info.price = lastPrice;
-        info.orderId = order.id;
-        info.balanceAfter = {
-            BTC: balanceAfter.total.BTC,
-            USDT: balanceAfter.total.USDT,
-            totalUSD: totalAfter
-        };
-
-        console.log(`✅ DCA BUY ${quantity.toFixed(6)} BTC @ $${lastPrice}`);
-        console.log(`Total Balance Before: $${totalBefore.toFixed(2)}, After: $${totalAfter.toFixed(2)}`);
-        await logInfo(info);
-
-    } catch (err) {
-        console.error('❌ DCA Order Failed:', err.message);
+  calculateEMA(data, period) {
+    const k = 2 / (period + 1);
+    let emaArray = [];
+    let ema = data[0];
+    emaArray.push(ema);
+    for (let i = 1; i < data.length; i++) {
+      ema = data[i] * k + ema * (1 - k);
+      emaArray.push(ema);
     }
-};
+    return emaArray;
+  }
 
-const main = async () => {
-    try {
-        await getKeyFromGDrive();
-        if (!fileContent) {
-            console.error('❌ Không lấy được API key từ Google Drive');
-            return;
-        }
-
-        const binanceFutures = new ccxt.binance({
-            apiKey: fileContent.apiKey,
-            secret: fileContent.secretKey,
-            enableRateLimit: true,
-            options: {
-                defaultType: 'future',
-                adjustForTimeDifference: true,
-            },
-            urls: {
-                api: {
-                    public: 'https://testnet.binancefuture.com/fapi/v1',
-                    private: 'https://testnet.binancefuture.com/fapi/v1',
-                }
-            }
-        });
-
-        // Binance Futures testnet không hỗ trợ setSandboxMode nên không gọi hàm này
-        binanceFutures.setSandboxMode(true);
-
-        while (true) {
-            await placeDCAOrder(binanceFutures);
-            await delay(dcaInterval);
-        }
-
-    } catch (err) {
-        console.error('❌ Error in main():', err.message);
+  calculateRSI(data, period = 14) {
+    let gains = 0;
+    let losses = 0;
+    for (let i = 1; i <= period; i++) {
+      const diff = data[i] - data[i - 1];
+      if (diff > 0) gains += diff;
+      else losses -= diff;
     }
-};
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    const rs = avgGain / avgLoss;
+    const rsi = 100 - 100 / (1 + rs);
+    return rsi;
+  }
+
+  async fetchOHLCV(limit = 50) {
+    return await this.exchange.fetchOHLCV(SYMBOL, '1m', undefined, limit);
+  }
+
+  async analyzeSignal() {
+    const ohlcv = await this.fetchOHLCV(50);
+    const closes = ohlcv.map(c => c[4]);
+    const emaShort = this.calculateEMA(closes, 9);
+    const emaLong = this.calculateEMA(closes, 21);
+    const rsi = this.calculateRSI(closes, 14);
+
+    const prevEmaShort = emaShort[emaShort.length - 2];
+    const prevEmaLong = emaLong[emaLong.length - 2];
+    const currEmaShort = emaShort[emaShort.length - 1];
+    const currEmaLong = emaLong[emaLong.length - 1];
+
+    if (prevEmaShort < prevEmaLong && currEmaShort > currEmaLong && rsi < 70) return 'long';
+    if (prevEmaShort > prevEmaLong && currEmaShort < currEmaLong && rsi > 30) return 'short';
+    return 'hold';
+  }
+
+  async placeMarketOrder(side, amount) {
+    if (side === 'buy') return await this.exchange.createMarketBuyOrder(SYMBOL, amount);
+    else if (side === 'sell') return await this.exchange.createMarketSellOrder(SYMBOL, amount);
+  }
+
+  async placeStopLossTakeProfit(positionSide, quantity, entryPrice) {
+    const slPct = 0.01; // 1%
+    const tpPct = 0.02; // 2%
+    let stopPrice, takeProfitPrice;
+
+    if (positionSide === 'long') {
+      stopPrice = entryPrice * (1 - slPct);
+      takeProfitPrice = entryPrice * (1 + tpPct);
+      await this.exchange.createOrder(SYMBOL, 'STOP_MARKET', 'sell', quantity, null, {
+        stopPrice,
+        closePosition: true,
+        reduceOnly: true,
+        timeInForce: 'GTC',
+      });
+      await this.exchange.createOrder(SYMBOL, 'TAKE_PROFIT_MARKET', 'sell', quantity, null, {
+        stopPrice: takeProfitPrice,
+        closePosition: true,
+        reduceOnly: true,
+        timeInForce: 'GTC',
+      });
+    } else if (positionSide === 'short') {
+      stopPrice = entryPrice * (1 + slPct);
+      takeProfitPrice = entryPrice * (1 - tpPct);
+      await this.exchange.createOrder(SYMBOL, 'STOP_MARKET', 'buy', quantity, null, {
+        stopPrice,
+        closePosition: true,
+        reduceOnly: true,
+        timeInForce: 'GTC',
+      });
+      await this.exchange.createOrder(SYMBOL, 'TAKE_PROFIT_MARKET', 'buy', quantity, null, {
+        stopPrice: takeProfitPrice,
+        closePosition: true,
+        reduceOnly: true,
+        timeInForce: 'GTC',
+      });
+    }
+  }
+
+  async run() {
+    const eventLog = { event: 'bot_run', time: moment().format(), message: '' };
+    try {
+      const balance = await this.fetchBalance();
+      const usdtFree = balance.free.USDT || 0;
+      eventLog.balanceBefore = balance.total;
+
+      if (usdtFree < DCA_USD_AMOUNT) {
+        eventLog.message = `Không đủ USDT để mua, còn: ${usdtFree}`;
+        logJSON(eventLog);
+        return;
+      }
+
+      const signal = await this.analyzeSignal();
+      eventLog.signal = signal;
+      eventLog.message = `Signal hiện tại: ${signal.toUpperCase()}`;
+      logJSON(eventLog);
+
+      if (signal === 'hold') {
+        logJSON({ ...eventLog, message: 'Không vào lệnh.' });
+        return;
+      }
+
+      const lastPrice = await this.getLastPrice();
+      const quantity = DCA_USD_AMOUNT / lastPrice;
+
+      if (quantity < MIN_BTC_AMOUNT) {
+        eventLog.message = `Số lượng BTC quá nhỏ: ${quantity.toFixed(6)}`;
+        logJSON(eventLog);
+        return;
+      }
+
+      const position = await this.fetchPositions();
+
+      if (position && position.side === signal) {
+        eventLog.message = `Tăng vị thế ${signal} thêm ${quantity.toFixed(6)} BTC`;
+        logJSON(eventLog);
+
+        const order = await this.placeMarketOrder(signal === 'long' ? 'buy' : 'sell', quantity);
+        await this.placeStopLossTakeProfit(signal, position.contracts + quantity, position.entryPrice);
+
+        eventLog.orderId = order.id;
+        eventLog.message = `Đặt lệnh DCA thành công`;
+        const balanceAfter = await this.fetchBalance();
+        eventLog.balanceAfter = balanceAfter.total;
+        logJSON(eventLog);
+
+      } else if (position && position.side !== signal) {
+        eventLog.message = `Đóng vị thế ${position.side} hiện tại: ${position.contracts} contracts`;
+        logJSON(eventLog);
+
+        await this.placeMarketOrder(position.side === 'long' ? 'sell' : 'buy', position.contracts);
+
+        eventLog.message = `Mở vị thế mới ${signal} với ${quantity.toFixed(6)} BTC`;
+        logJSON(eventLog);
+
+        const order = await this.placeMarketOrder(signal === 'long' ? 'buy' : 'sell', quantity);
+        await this.placeStopLossTakeProfit(signal, quantity, lastPrice);
+
+        eventLog.orderId = order.id;
+        eventLog.message = `Đặt lệnh mở vị thế thành công`;
+        const balanceAfter = await this.fetchBalance();
+        eventLog.balanceAfter = balanceAfter.total;
+        logJSON(eventLog);
+
+      } else {
+        eventLog.message = `Mở vị thế mới ${signal} với ${quantity.toFixed(6)} BTC`;
+        logJSON(eventLog);
+
+        const order = await this.placeMarketOrder(signal === 'long' ? 'buy' : 'sell', quantity);
+        await this.placeStopLossTakeProfit(signal, quantity, lastPrice);
+
+        eventLog.orderId = order.id;
+        eventLog.message = `Đặt lệnh mở vị thế thành công`;
+        const balanceAfter = await this.fetchBalance();
+        eventLog.balanceAfter = balanceAfter.total;
+        logJSON(eventLog);
+      }
+    } catch (error) {
+      logJSON({ event: 'error', time: moment().format(), message: error.message, stack: error.stack });
+    }
+  }
+}
+
+async function main() {
+  try {
+    const key = await getKeyFromGDrive();
+    
+    const bot = new BinanceFuturesDCA(key.apiKey, key.secretKey);
+
+    logJSON({ event: 'start', time: moment().format(), message: 'Bot bắt đầu chạy.' });
+
+    setInterval(() => bot.run(), DCA_INTERVAL);
+  } catch (e) {
+    logJSON({ event: 'init_error', time: moment().format(), message: e.message, stack: e.stack });
+  }
+}
 
 main();
