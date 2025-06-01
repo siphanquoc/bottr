@@ -12,7 +12,8 @@ let fileContent = undefined;
 const logDir = './logFU';
 
 const dcaAmount = 20; // USD mỗi lần mua
-const dcaInterval = 60000; // 1 phut
+const dcaInterval = 60000; // 1 phút (bạn có thể chỉnh lại)
+const MIN_ORDER_SIZE = 0.001; // Min order size 0.001 BTC của Binance Futures
 
 if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir);
@@ -37,7 +38,7 @@ const getKeyFromGDrive = async () => {
     );
     return new Promise((resolve, reject) => {
         let data = '';
-        res.data.on('data', (chunk) => (data += chunk.toString()));
+        res.data.on('data', chunk => data += chunk.toString());
         res.data.on('end', () => {
             fileContent = JSON.parse(data);
             resolve();
@@ -46,16 +47,15 @@ const getKeyFromGDrive = async () => {
     });
 };
 
-const getLastPrice = async (binanceFutures) => {
-    const ticker = await binanceFutures.fetchTicker('BTC/USDT');
+const getLastPrice = async (binance) => {
+    const ticker = await binance.fetchTicker('BTC/USDT');
     return ticker.last;
 };
 
-const placeDCAOrder = async (binanceFutures) => {
+const placeDCAOrder = async (binance) => {
     try {
-        const lastPrice = await getLastPrice(binanceFutures);
-
-        const balanceBefore = await binanceFutures.fetchBalance();
+        const lastPrice = await getLastPrice(binance);
+        const balanceBefore = await binance.fetchBalance();
         const totalBefore = balanceBefore.total.BTC * lastPrice + balanceBefore.total.USDT;
 
         let info = {
@@ -63,20 +63,20 @@ const placeDCAOrder = async (binanceFutures) => {
             balanceBefore: {
                 BTC: balanceBefore.total.BTC,
                 USDT: balanceBefore.total.USDT,
-                totalUSD: totalBefore,
-            },
+                totalUSD: totalBefore
+            }
         };
 
         if (balanceBefore.total.USDT < dcaAmount) {
             info.action = 'hold';
             info.reason = 'Insufficient USDT balance';
 
-            const balanceAfter = await binanceFutures.fetchBalance();
+            const balanceAfter = await binance.fetchBalance();
             const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
             info.balanceAfter = {
                 BTC: balanceAfter.total.BTC,
                 USDT: balanceAfter.total.USDT,
-                totalUSD: totalAfter,
+                totalUSD: totalAfter
             };
 
             console.log(`⏸️ HOLD - Không đủ USDT để mua.`);
@@ -85,54 +85,45 @@ const placeDCAOrder = async (binanceFutures) => {
         }
 
         const quantity = dcaAmount / lastPrice;
-        const roundedQuantity = Math.floor(quantity * 1000) / 1000;
 
-        if (roundedQuantity < 0.001) {
+        if (quantity < MIN_ORDER_SIZE) {
             info.action = 'hold';
-            info.reason = 'Quantity less than minimum lot size (0.001)';
+            info.reason = `Order size too small: ${quantity.toFixed(6)} BTC < min order size ${MIN_ORDER_SIZE}`;
 
-            const balanceAfter = await binanceFutures.fetchBalance();
+            const balanceAfter = await binance.fetchBalance();
             const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
             info.balanceAfter = {
                 BTC: balanceAfter.total.BTC,
                 USDT: balanceAfter.total.USDT,
-                totalUSD: totalAfter,
+                totalUSD: totalAfter
             };
 
-            console.log('⏸️ HOLD - Số lượng mua nhỏ hơn 0.001 BTC.');
+            console.log(`⏸️ HOLD - Số lượng mua nhỏ hơn ${MIN_ORDER_SIZE} BTC.`);
             await logInfo(info);
             return;
         }
 
-        const order = await binanceFutures.createMarketBuyOrder('BTC/USDT', roundedQuantity);
+        const order = await binance.createMarketBuyOrder('BTC/USDT', quantity);
 
-        const balanceAfter = await binanceFutures.fetchBalance();
+        const balanceAfter = await binance.fetchBalance();
         const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
 
-        info = {
-            ...info,
-            action: 'buy',
-            quantity: roundedQuantity,
-            price: lastPrice,
-            orderId: order.id,
-            balanceAfter: {
-                BTC: balanceAfter.total.BTC,
-                USDT: balanceAfter.total.USDT,
-                totalUSD: totalAfter,
-            },
+        info.action = 'buy';
+        info.quantity = quantity;
+        info.price = lastPrice;
+        info.orderId = order.id;
+        info.balanceAfter = {
+            BTC: balanceAfter.total.BTC,
+            USDT: balanceAfter.total.USDT,
+            totalUSD: totalAfter
         };
 
-        console.log(`✅ BUY ${roundedQuantity.toFixed(6)} BTC @ $${lastPrice}`);
+        console.log(`✅ DCA BUY ${quantity.toFixed(6)} BTC @ $${lastPrice}`);
         console.log(`Total Balance Before: $${totalBefore.toFixed(2)}, After: $${totalAfter.toFixed(2)}`);
         await logInfo(info);
+
     } catch (err) {
-        const errorInfo = {
-            time: moment().format('YYYY-MM-DD HH:mm:ss'),
-            action: 'error',
-            message: err.message,
-        };
-        console.error('❌ Order Failed:', err.message);
-        await logInfo(errorInfo);
+        console.error('❌ DCA Order Failed:', err.message);
     }
 };
 
@@ -156,16 +147,18 @@ const main = async () => {
                 api: {
                     public: 'https://testnet.binancefuture.com/fapi/v1',
                     private: 'https://testnet.binancefuture.com/fapi/v1',
-                },
-            },
+                }
+            }
         });
 
+        // Binance Futures testnet không hỗ trợ setSandboxMode nên không gọi hàm này
         binanceFutures.setSandboxMode(true);
 
         while (true) {
             await placeDCAOrder(binanceFutures);
             await delay(dcaInterval);
         }
+
     } catch (err) {
         console.error('❌ Error in main():', err.message);
     }
