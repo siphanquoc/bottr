@@ -5,161 +5,134 @@ const moment = require('moment');
 const delay = require('delay');
 const dotenv = require('dotenv');
 const { google } = require('googleapis');
-const math = require('mathjs');
 
 dotenv.config();
 
-var fileContent = undefined;
+let fileContent = undefined;
+const logDir = './log';
 
-const printBalance = async (infoPrice) => {
-    try {
-        const logFolder = path.join('./', 'log');
-        if (!fs.existsSync(logFolder)) {
-            fs.mkdirSync(logFolder);
-        }
-        const logFilePath = path.join(logFolder, `log_${moment().format('YYYY-MM-DD')}.json`);
-        if (fs.existsSync(logFilePath)) {
-            const existingData = JSON.parse(fs.readFileSync(logFilePath, 'utf8'));
-            existingData.unshift(infoPrice);
-            fs.writeFileSync(logFilePath, JSON.stringify(existingData, null, 2), 'utf8');
-        } else {
-            fs.writeFileSync(logFilePath, JSON.stringify([infoPrice], null, 2), 'utf8');
-        }
-        console.log(`Balance logged to ${logFilePath}`);
-    } catch (error) {
-        console.error('Error loading balance:', error);
-    }
+const dcaAmount = 20; // USD mỗi lần mua
+const dcaInterval = 3600000; // Mỗi giờ (ms)
+
+if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir);
+}
+
+const logInfo = async (info) => {
+    const logFilePath = path.join(logDir, `log_${moment().format('YYYY-MM-DD')}.json`);
+    const existing = fs.existsSync(logFilePath) ? JSON.parse(fs.readFileSync(logFilePath)) : [];
+    existing.unshift(info);
+    fs.writeFileSync(logFilePath, JSON.stringify(existing, null, 2));
 };
 
-// Gaussian kernel function
-function gaussianKernel(x, xi, h) {
-    return Math.exp(-Math.pow(x - xi, 2) / (2 * Math.pow(h, 2)));
-}
-
-// Nadaraya-Watson estimator
-function nadarayaWatson(x, X, Y, h) {
-    const weights = X.map(xi => gaussianKernel(x, xi, h));
-    const numerator = weights.reduce((sum, w, i) => sum + w * Y[i], 0);
-    const denominator = weights.reduce((sum, w) => sum + w, 0);
-    return numerator / denominator;
-}
-
-// Generate upper/lower envelopes
-function getEnvelopes(X, Y, h, bandWidth = 0.01) {
-    const smooth = X.map(x => nadarayaWatson(x, X, Y, h));
-    const upper = smooth.map(s => s * (1 + bandWidth));
-    const lower = smooth.map(s => s * (1 - bandWidth));
-    return { smooth, upper, lower };
-}
-
-const order = async (binance) => {
-    try {
-        const size = 20; // Trade size in USDT
-        const prices = await binance.fetchOHLCV('BTC/USDT', '1m', undefined, 50);
-        const closes = prices.map(p => p[4]);
-        const timestamps = prices.map(p => p[0]);
-
-        const h = 5; // Kernel smoothing bandwidth
-        const { upper, lower } = getEnvelopes(timestamps, closes, h);
-
-        const lastPrice = closes[closes.length - 1];
-        const lastUpper = upper[upper.length - 1];
-        const lastLower = lower[lower.length - 1];
-
-        const balance = await binance.fetchBalance();
-        let quantity = size / lastPrice;
-        let direction = 'hold';
-
-        if (lastPrice > lastUpper && balance.total.BTC > 0) {
-            quantity = Math.min(quantity, balance.total.BTC);
-            direction = 'sell';
-        } else if (lastPrice < lastLower && balance.total.USDT >= size) {
-            direction = 'buy';
-        }
-
-        const infoPrice = {
-            lastPrice,
-            upperBand: lastUpper,
-            lowerBand: lastLower,
-            direction,
-            timestamp: moment().format('YYYY-MM-DD HH:mm:ss'),
-            quantity
-        };
-
-        if (direction !== 'hold') {
-            const orderResponse = await binance.createMarketOrder('BTC/USDT', direction, quantity);
-            console.log(`Order executed: ${direction} ${quantity} BTC at ${lastPrice}`);
-            infoPrice.orderId = orderResponse.id;
-        }
-
-        const balanceAfterOrder = await binance.fetchBalance();
-        infoPrice.balance = {
-            BTC: balanceAfterOrder.total.BTC,
-            USDT: balanceAfterOrder.total.USDT,
-            totalUSDT: balanceAfterOrder.total.BTC * lastPrice + balanceAfterOrder.total.USDT
-        };
-
-        await printBalance(infoPrice);
-    } catch (error) {
-        console.error('Error placing order:', error);
-    }
+const getKeyFromGDrive = async () => {
+    const auth = new google.auth.GoogleAuth({
+        keyFile: './credentials.json',
+        scopes: [process.env.GOOGLE_AUTH_SCOPES],
+    });
+    const drive = google.drive({ version: 'v3', auth });
+    const res = await drive.files.get({ fileId: process.env.GOOGLE_FIELD_ID, alt: 'media' }, { responseType: 'stream' });
+    return new Promise((resolve, reject) => {
+        let data = '';
+        res.data.on('data', chunk => data += chunk.toString());
+        res.data.on('end', () => {
+            fileContent = JSON.parse(data);
+            resolve();
+        });
+        res.data.on('error', reject);
+    });
 };
 
-const getKeyfromGDrive = async () => {
+const getLastPrice = async (binance) => {
+    const ticker = await binance.fetchTicker('BTC/USDT');
+    return ticker.last;
+};
+
+const placeDCAOrder = async (binance) => {
     try {
-        const auth = new google.auth.GoogleAuth({
-            keyFile: path.join('./', 'credentials.json'),
-            scopes: [process.env.GOOGLE_AUTH_SCOPES]
-        });
+        const lastPrice = await getLastPrice(binance);
 
-        const drive = google.drive({ version: 'v3', auth });
-        const fileId = process.env.GOOGLE_FIELD_ID;
-        const res = await drive.files.get(
-            { fileId, alt: 'media' },
-            { responseType: 'stream' }
-        );
+        // Lấy balance trước khi quyết định mua
+        const balanceBefore = await binance.fetchBalance();
+        const totalBefore = balanceBefore.total.BTC * lastPrice + balanceBefore.total.USDT;
 
-        await new Promise((resolve, reject) => {
-            let data = '';
-            res.data
-                .on('data', (chunk) => {
-                    data += chunk.toString();
-                })
-                .on('end', () => {
-                    fileContent = JSON.parse(data);
-                    resolve();
-                })
-                .on('error', reject);
-        });
+        let info = {
+            time: moment().format('YYYY-MM-DD HH:mm:ss'),
+            balanceBefore: {
+                BTC: balanceBefore.total.BTC,
+                USDT: balanceBefore.total.USDT,
+                totalUSD: totalBefore
+            }
+        };
 
-    } catch (error) {
-        console.error('Error in getKeyfromGDrive:', error);
-        throw error;
+        if (balanceBefore.total.USDT < dcaAmount) {
+            // Không đủ tiền mua thì hold
+            info.action = 'hold';
+            info.reason = 'Insufficient USDT balance';
+
+            // Lấy balance sau (giữ nguyên vì không mua)
+            const balanceAfter = await binance.fetchBalance();
+            const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
+            info.balanceAfter = {
+                BTC: balanceAfter.total.BTC,
+                USDT: balanceAfter.total.USDT,
+                totalUSD: totalAfter
+            };
+
+            console.log(`⏸️ Không đủ USDT để mua. Đang giữ trạng thái hold.`);
+            await logInfo(info);
+            return;
+        }
+
+        // Nếu đủ tiền thì mua
+        const quantity = dcaAmount / lastPrice;
+        const order = await binance.createMarketBuyOrder('BTC/USDT', quantity);
+
+        const balanceAfter = await binance.fetchBalance();
+        const totalAfter = balanceAfter.total.BTC * lastPrice + balanceAfter.total.USDT;
+
+        info = {
+            ...info,
+            action: 'buy',
+            quantity,
+            price: lastPrice,
+            orderId: order.id,
+            balanceAfter: {
+                BTC: balanceAfter.total.BTC,
+                USDT: balanceAfter.total.USDT,
+                totalUSD: totalAfter
+            }
+        };
+
+        console.log(`✅ DCA BUY ${quantity.toFixed(6)} BTC @ $${lastPrice}`);
+        console.log(`Total Balance Before: $${totalBefore.toFixed(2)}, After: $${totalAfter.toFixed(2)}`);
+        await logInfo(info);
+
+    } catch (err) {
+        console.error('❌ DCA Order Failed:', err.message);
     }
 };
 
 const main = async () => {
     try {
-        await getKeyfromGDrive();
+        await getKeyFromGDrive();
         if (!fileContent) return;
 
         const binance = new ccxt.binance({
             apiKey: fileContent.apiKey,
             secret: fileContent.secretKey,
-            options: {
-                recvWindow: 60000
-            },
+            enableRateLimit: true,
         });
 
-        binance.setSandboxMode(true); // Enable sandbox mode
+        binance.setSandboxMode(true); // Sử dụng sandbox
 
         while (true) {
-            await order(binance);
-            await delay(60000); // Wait 1 minute
+            await placeDCAOrder(binance);
+            await delay(dcaInterval);
         }
 
-    } catch (error) {
-        console.error('Error in main:', error);
+    } catch (err) {
+        console.error('❌ Error in main():', err.message);
     }
 };
 
