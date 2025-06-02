@@ -7,8 +7,8 @@ const { google } = require('googleapis');
 
 dotenv.config();
 
-const SYMBOL = 'DOGE/USDT';
-const DCA_USD_AMOUNT = 10;
+const SYMBOL = 'BTC/USDT';
+const DCA_USD_AMOUNT = 110;
 const MIN_BTC_AMOUNT = 0.001;
 const DCA_INTERVAL = 60 * 1000;
 const LEVERAGE = 5;
@@ -82,8 +82,25 @@ class BinanceFuturesDCA {
   }
 
   async fetchPositions() {
-    const positions = await this.exchange.fetchPositions([SYMBOL]);
-    return positions.find(p => p.symbol === SYMBOL && p.contracts > 0) || null;
+    try {
+      const positions = await this.exchange.fetchPositions([SYMBOL]);
+      if (!positions || positions.length === 0) {
+        logJSON({ event: 'no_positions', time: moment().format(), message: `Không có position nào được trả về cho ${SYMBOL}` });
+        return null;
+      }
+
+      const activePosition = positions.find(p => p.symbol === SYMBOL && Math.abs(p.contracts || 0) > 0);
+
+      if (!activePosition) {
+        logJSON({ event: 'no_active_position', time: moment().format(), message: `Không tìm thấy position đang mở cho ${SYMBOL}` });
+        return null;
+      }
+
+      return activePosition;
+    } catch (e) {
+      logJSON({ event: 'error_fetch_positions', time: moment().format(), message: e.message });
+      return null;
+    }
   }
 
   async getLastPrice() {
