@@ -11,8 +11,8 @@ dotenv.config();
 let fileContent = undefined;
 const logDir = './log';
 
-const dcaAmount = 20; // USD mỗi lần mua
-const dcaInterval = 3600000; // Mỗi giờ (ms)
+const dcaAmount = 60; // USD mỗi lần mua
+const dcaInterval = 60 * 1000; // Mỗi giờ (ms)
 
 if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir);
