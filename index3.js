@@ -222,61 +222,60 @@ class BinanceFuturesDCA {
   async run() {
     const eventLog = { event: 'bot_run', time: moment().format(), message: '' };
     try {
-      // Đặt đòn bẩy x5 mỗi lần chạy
-      await this.setLeverage(5);
-
-      const balance = await this.fetchBalance();
-      const usdtFree = balance.free.USDT || 0;
-      eventLog.balanceBefore = { USDT: usdtFree };
-
-      if (usdtFree < DCA_USD_AMOUNT) {
-        eventLog.message = `Không đủ USDT để mua, còn: ${usdtFree}`;
-        logJSON(eventLog);
-        return;
-      }
-
-      const lastPrice = await this.getLastPrice();
-      const quantity = (DCA_USD_AMOUNT / lastPrice).toFixed(3); // làm tròn 3 chữ số thập phân
-
-      if (quantity < MIN_BTC_AMOUNT) {
-        eventLog.message = `Số lượng mua (${quantity}) nhỏ hơn tối thiểu (${MIN_BTC_AMOUNT})`;
-        logJSON(eventLog);
-        return;
-      }
-
       const signal = await this.analyzeSignal();
-
       eventLog.message = `Signal hiện tại: ${signal}`;
       logJSON(eventLog);
-
-      if (signal === 'long') {
-        // Đặt lệnh mua
-        const order = await this.placeMarketOrder('buy', quantity);
-        eventLog.message = `Đặt lệnh mua ${quantity} ${SYMBOL} thành công`;
-        logJSON(eventLog);
-
-        // Đặt stop-loss và take-profit
-        await this.placeStopLossTakeProfit('long', quantity, lastPrice);
-        eventLog.message = 'Đã đặt SL và TP cho lệnh long';
-        logJSON(eventLog);
-      } else if (signal === 'short') {
-        // Đặt lệnh bán khống
-        const order = await this.placeMarketOrder('sell', quantity);
-        eventLog.message = `Đặt lệnh bán khống ${quantity} ${SYMBOL} thành công`;
-        logJSON(eventLog);
-
-        // Đặt stop-loss và take-profit
-        await this.placeStopLossTakeProfit('short', quantity, lastPrice);
-        eventLog.message = 'Đã đặt SL và TP cho lệnh short';
-        logJSON(eventLog);
+  
+      // Chỉ xử lý nếu có tín hiệu long hoặc short
+      if (signal === 'long' || signal === 'short') {
+        // Đặt đòn bẩy
+        await this.setLeverage(5);
+  
+        const balance = await this.fetchBalance();
+        const usdtFree = balance.free.USDT || 0;
+        eventLog.balanceBefore = { USDT: usdtFree };
+  
+        if (usdtFree < DCA_USD_AMOUNT) {
+          eventLog.message = `Không đủ USDT để mua, còn: ${usdtFree}`;
+          logJSON(eventLog);
+          return;
+        }
+  
+        const lastPrice = await this.getLastPrice();
+        const quantity = (DCA_USD_AMOUNT / lastPrice).toFixed(3);
+  
+        if (quantity < MIN_BTC_AMOUNT) {
+          eventLog.message = `Số lượng mua (${quantity}) nhỏ hơn tối thiểu (${MIN_BTC_AMOUNT})`;
+          logJSON(eventLog);
+          return;
+        }
+  
+        if (signal === 'long') {
+          const order = await this.placeMarketOrder('buy', quantity);
+          eventLog.message = `Đặt lệnh mua ${quantity} ${SYMBOL} thành công`;
+          logJSON(eventLog);
+  
+          await this.placeStopLossTakeProfit('long', quantity, lastPrice);
+          eventLog.message = 'Đã đặt SL và TP cho lệnh long';
+          logJSON(eventLog);
+        } else if (signal === 'short') {
+          const order = await this.placeMarketOrder('sell', quantity);
+          eventLog.message = `Đặt lệnh bán khống ${quantity} ${SYMBOL} thành công`;
+          logJSON(eventLog);
+  
+          await this.placeStopLossTakeProfit('short', quantity, lastPrice);
+          eventLog.message = 'Đã đặt SL và TP cho lệnh short';
+          logJSON(eventLog);
+        }
       } else {
+        // Nếu là "hold", không cần làm gì thêm
         eventLog.message = 'Không có tín hiệu mua/bán. Giữ trạng thái hiện tại.';
         logJSON(eventLog);
       }
     } catch (error) {
       logJSON({ event: 'error', time: moment().format(), message: error.message });
     }
-  }
+  }  
 }
 
 (async () => {
