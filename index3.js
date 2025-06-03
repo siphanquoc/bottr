@@ -1,4 +1,4 @@
-// Binance Futures DCA Bot with Sync + Smart TP/SL
+// Binance Futures DCA Bot with Sync + Smart TP/SL + USDT Balance Logging
 const ccxt = require('ccxt');
 const fs = require('fs');
 const path = require('path');
@@ -34,7 +34,6 @@ function logJSON(data) {
   console.log(`${moment().format('YYYY-MM-DD HH:mm:ss')} | ${data.event} | ${data.message}`);
 }
 
-// === Lưu và tải trạng thái lệnh ===
 function saveOrderState(orderState) {
   fs.writeFileSync(ORDER_PATH, JSON.stringify(orderState, null, 2));
 }
@@ -50,10 +49,10 @@ async function getKeyFromGDrive() {
     scopes: [process.env.GOOGLE_AUTH_SCOPES],
   });
   const drive = google.drive({ version: 'v3', auth });
-  const res = await drive.files.get(
-    { fileId: process.env.GOOGLE_FIELD_ID_FU, alt: 'media' },
-    { responseType: 'stream' }
-  );
+  const res = await drive.files.get({
+    fileId: process.env.GOOGLE_FIELD_ID_FU, alt: 'media'
+  }, { responseType: 'stream' });
+
   return new Promise((resolve, reject) => {
     let data = '';
     res.data.on('data', chunk => (data += chunk.toString()));
@@ -69,14 +68,13 @@ class BinanceFuturesDCA {
       options: { defaultType: 'future', adjustForTimeDifference: true },
     });
     this.exchange.setSandboxMode(true);
-    const state = loadOrderState();
-    this.orderState = typeof state === 'object' && state !== null ? state : {};
+    this.orderState = loadOrderState() || {};
   }
 
-  // === Đặt đòn bẩy cho mỗi cặp ===
   async setLeverage(symbol, leverage = LEVERAGE) {
     try {
       await this.exchange.setLeverage(leverage, symbol);
+      await this.logBalance('leverage_set');
       logJSON({ event: 'leverage_set', time: moment().format(), message: `Đòn bẩy x${leverage} đặt cho ${symbol}` });
     } catch (error) {
       logJSON({ event: 'error_leverage', time: moment().format(), message: error.message });
@@ -85,6 +83,12 @@ class BinanceFuturesDCA {
 
   async fetchBalance() {
     return await this.exchange.fetchBalance();
+  }
+
+  async logBalance(eventName) {
+    const balance = await this.fetchBalance();
+    const usdt = +(balance.free.USDT || 0).toFixed(2);
+    logJSON({ event: eventName, time: moment().format(), message: `Số dư USDT còn lại: ${usdt}`, usdt });
   }
 
   async fetchPositions(symbol) {
@@ -106,41 +110,27 @@ class BinanceFuturesDCA {
     }
   }
 
-  // === Đồng bộ lệnh mở từ sàn về file order.json ===
   async syncOpenOrders() {
-    if (typeof this.orderState !== 'object') this.orderState = {};
     for (const symbol of SYMBOLS) {
       const openOrders = await this.fetchOpenOrders(symbol);
-      this.orderState[symbol] = this.orderState[symbol] || {};
-      this.orderState[symbol].pendingOrders = openOrders.map(o => ({
-        id: o.id, type: o.type, side: o.side, price: o.price,
-        amount: o.amount, status: o.status,
-      }));
-  
-      // ➕ Đồng bộ vị thế đang mở
       const position = await this.fetchPositions(symbol);
-      if (position) {
-        const lastPrice = (await this.exchange.fetchTicker(symbol)).last;
-        const pnlData = this.calculatePnL(position, lastPrice);
-        this.orderState[symbol] = {
-          ...this.orderState[symbol],
-          time: moment().format(),
-          signal: position.side.toLowerCase(),
-          entry: position.entryPrice,
-          size: position.contracts,
-          side: position.side,
-          lastPrice,
-          pnl: pnlData.pnl,
-          pnlPct: pnlData.pct,
-          pendingOrders: this.orderState[symbol].pendingOrders || []
-        };
-      }
+      const lastPrice = (await this.exchange.fetchTicker(symbol)).last;
+      const pnlData = position ? this.calculatePnL(position, lastPrice) : null;
+      this.orderState[symbol] = {
+        time: moment().format(),
+        signal: position?.side.toLowerCase(),
+        entry: position?.entryPrice,
+        size: position?.contracts,
+        side: position?.side,
+        lastPrice,
+        pnl: pnlData?.pnl,
+        pnlPct: pnlData?.pct,
+        pendingOrders: openOrders.map(o => ({ id: o.id, type: o.type, side: o.side, price: o.price, amount: o.amount, status: o.status }))
+      };
     }
     saveOrderState(this.orderState);
   }
-  
 
-  // === Tính toán lời/lỗ hiện tại của vị thế ===
   calculatePnL(position, lastPrice) {
     const { entryPrice: entry, contracts: size, side } = position;
     const long = side.toLowerCase() === 'long';
@@ -149,7 +139,6 @@ class BinanceFuturesDCA {
     return { pnl: +pnl.toFixed(2), pct: +pct.toFixed(2) };
   }
 
-  // === Kiểm tra và đóng lệnh nếu đạt TP/SL sớm ===
   async checkAndClosePositions() {
     for (const symbol of SYMBOLS) {
       const position = await this.fetchPositions(symbol);
@@ -161,6 +150,7 @@ class BinanceFuturesDCA {
         try {
           await this.exchange.createMarketOrder(symbol, closeSide, position.contracts);
           logJSON({ event: 'manual_close', time: moment().format(), symbol, message: `Đóng vị thế ${symbol} với PnL ${pct.toFixed(2)}%` });
+          await this.logBalance('balance_after_close');
           delete this.orderState[symbol];
           saveOrderState(this.orderState);
         } catch (e) {
@@ -170,7 +160,6 @@ class BinanceFuturesDCA {
     }
   }
 
-  // === Tính toán EMA và RSI đơn giản ===
   calculateEMA(data, period) {
     const k = 2 / (period + 1);
     let ema = data[0];
@@ -187,7 +176,6 @@ class BinanceFuturesDCA {
     return 100 - 100 / (1 + rs);
   }
 
-  // === Phân tích tín hiệu mua/bán từ EMA và RSI ===
   async analyzeSignal(symbol) {
     const ohlcv = await this.exchange.fetchOHLCV(symbol, '1m', undefined, 100);
     const closes = ohlcv.map(c => c[4]);
@@ -206,13 +194,14 @@ class BinanceFuturesDCA {
     return 'hold';
   }
 
-  // === Đặt lệnh thị trường, TP và SL thông minh ===
   async placeOrders(symbol, signal, qty, price) {
     const side = signal === 'long' ? 'buy' : 'sell';
     const sl = signal === 'long' ? price * 0.99 : price * 1.01;
     const tp = signal === 'long' ? price * 1.02 : price * 0.98;
 
     await this.exchange.createMarketOrder(symbol, side, qty);
+    await this.logBalance('balance_after_market_order');
+
     await this.exchange.createOrder(symbol, 'STOP_MARKET', side === 'buy' ? 'sell' : 'buy', qty, null, {
       stopPrice: +sl.toFixed(6),
       timeInForce: 'GTC',
@@ -221,9 +210,9 @@ class BinanceFuturesDCA {
       stopPrice: +tp.toFixed(6),
       timeInForce: 'GTC',
     });
+    await this.logBalance('balance_after_tp_sl');
   }
 
-  // === Logic xử lý mỗi cặp giao dịch ===
   async runForSymbol(symbol) {
     const now = moment().format();
 
@@ -241,7 +230,10 @@ class BinanceFuturesDCA {
 
     const signal = await this.analyzeSignal(symbol);
     logJSON({ event: 'signal', time: now, symbol, message: `Tín hiệu: ${signal}` });
-    if (signal === 'hold') return;
+    if (signal === 'hold') {
+      await this.logBalance('balance_after_hold');
+      return;
+    }
 
     await this.setLeverage(symbol);
     const balance = await this.fetchBalance();
@@ -249,6 +241,7 @@ class BinanceFuturesDCA {
     const qty = +(DCA_USD_AMOUNT / lastPrice).toFixed(3);
     if (qty < MIN_CRYPTO_AMOUNT || (balance.free.USDT || 0) < DCA_USD_AMOUNT) {
       logJSON({ event: 'insufficient', time: now, symbol, message: 'Không đủ điều kiện đặt lệnh.' });
+      await this.logBalance('balance_insufficient');
       return;
     }
 
