@@ -9,7 +9,7 @@ const { google } = require('googleapis');
 dotenv.config();
 
 // === Cấu hình các tham số giao dịch chính ===
-const SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'DOGE/USDT'];
+const SYMBOLS = ['BTC/USDT'];
 const DCA_USD_AMOUNT = 110;
 const MIN_CRYPTO_AMOUNT = 0.001;
 const DCA_INTERVAL = 60 * 1000; // Chạy mỗi phút
@@ -116,9 +116,29 @@ class BinanceFuturesDCA {
         id: o.id, type: o.type, side: o.side, price: o.price,
         amount: o.amount, status: o.status,
       }));
+  
+      // ➕ Đồng bộ vị thế đang mở
+      const position = await this.fetchPositions(symbol);
+      if (position) {
+        const lastPrice = (await this.exchange.fetchTicker(symbol)).last;
+        const pnlData = this.calculatePnL(position, lastPrice);
+        this.orderState[symbol] = {
+          ...this.orderState[symbol],
+          time: moment().format(),
+          signal: position.side.toLowerCase(),
+          entry: position.entryPrice,
+          size: position.contracts,
+          side: position.side,
+          lastPrice,
+          pnl: pnlData.pnl,
+          pnlPct: pnlData.pct,
+          pendingOrders: this.orderState[symbol].pendingOrders || []
+        };
+      }
     }
     saveOrderState(this.orderState);
   }
+  
 
   // === Tính toán lời/lỗ hiện tại của vị thế ===
   calculatePnL(position, lastPrice) {
